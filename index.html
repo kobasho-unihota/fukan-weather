@@ -37,7 +37,7 @@
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
-      overscroll-behavior-y: none; /* Pull-to-refreshによる画面全体のズレを防ぐ */
+      overscroll-behavior-y: none;
     }
 
     .hide-scrollbar::-webkit-scrollbar {
@@ -48,27 +48,24 @@
       scrollbar-width: none;
     }
 
-    /* モーダルのアニメーション */
     .modal-enter { transform: translateY(100%); }
     .modal-enter-active { transform: translateY(0); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
     .modal-exit { transform: translateY(0); }
     .modal-exit-active { transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
   </style>
 
-  <!-- 動的にPWA設定を注入するためのスクリプト -->
   <script>
-    // PWAアイコン (SVG Base64)
+    // PWAアイコン
     const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="#38bdf8"/><path d="M128,40A88,88,0,1,0,216,128,88.1,88.1,0,0,0,128,40Zm0,160a72,72,0,1,1,72-72A72.08,72.08,0,0,1,128,200Z" fill="#ffffff"/><circle cx="128" cy="128" r="48" fill="#facc15"/></svg>`;
     const iconBase64 = 'data:image/svg+xml;base64,' + btoa(iconSvg);
 
-    // Manifest JSON
     const manifest = {
       "name": "俯瞰天気",
       "short_name": "俯瞰天気",
       "start_url": ".",
       "display": "standalone",
       "background_color": "#f8fafc",
-      "theme_color": "#f8fafc",
+      "theme_color": "#ffffff",
       "icons": [{ "src": iconBase64, "sizes": "192x192 512x512", "type": "image/svg+xml" }]
     };
 
@@ -77,13 +74,11 @@
     manifestLink.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
     document.head.appendChild(manifestLink);
 
-    // Apple Touch Icon
     const appleIcon = document.createElement('link');
     appleIcon.rel = 'apple-touch-icon';
     appleIcon.href = iconBase64;
     document.head.appendChild(appleIcon);
 
-    // Service Worker (キャッシュなし、PWAインストール要件を満たすためだけの最小構成)
     const swCode = `
       self.addEventListener('install', e => self.skipWaiting());
       self.addEventListener('activate', e => self.clients.claim());
@@ -91,14 +86,14 @@
     `;
     const swBlob = new Blob([swCode], { type: 'application/javascript' });
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(err => console.log('SW registration failed:', err));
+      navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
     }
   </script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
   <!-- ヘッダー -->
-  <header class="fixed top-0 left-0 right-0 z-20 bg-white/80 backdrop-blur-md border-b border-slate-200 pt-safe">
+  <header class="fixed top-0 left-0 right-0 z-20 bg-white/90 backdrop-blur-md border-b border-slate-200 pt-safe shadow-sm">
     <div class="flex items-center justify-between px-4 h-14">
       <button id="editBtn" class="text-blue-500 font-medium px-2 py-1 active:opacity-50 transition-opacity">編集</button>
       <h1 class="text-lg font-bold">俯瞰天気</h1>
@@ -113,136 +108,95 @@
     </div>
   </header>
 
-  <!-- メインコンテンツ (グリッド) -->
+  <!-- メインコンテンツ -->
   <main class="flex-1 overflow-y-auto mt-14 pb-safe px-4 py-4 hide-scrollbar">
-    <!-- ローディング表示 -->
     <div id="loadingIndicator" class="flex flex-col items-center justify-center py-20 text-slate-400 hidden">
       <i class="ph ph-spinner-gap animate-spin text-4xl mb-2"></i>
       <p class="text-sm">天気データを取得中...</p>
     </div>
     
-    <!-- 天気カードグリッド -->
-    <div id="weatherGrid" class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-      <!-- カードはJSで動的に生成されます -->
+    <!-- 縦並びのカードグリッド -->
+    <div id="weatherGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <!-- カードはJSで動的に生成 -->
     </div>
 
-    <!-- 登録地点がない場合 -->
     <div id="emptyState" class="hidden flex-col items-center justify-center py-20 text-slate-500 text-center">
       <i class="ph ph-map-pin text-5xl mb-3 text-slate-300"></i>
-      <p class="mb-1">地点が登録されていません</p>
-      <p class="text-sm text-slate-400">右上の「+」ボタンから<br>見たい地域を追加してください</p>
+      <p class="mb-1 font-bold">地点がありません</p>
+      <p class="text-sm text-slate-400 mt-2">右上の「+」ボタンから<br>見たい市区町村を追加してください</p>
     </div>
   </main>
 
-  <!-- モーダル背景オーバーレイ -->
+  <!-- オーバーレイ -->
   <div id="modalOverlay" class="fixed inset-0 bg-black/40 z-30 hidden opacity-0 transition-opacity duration-300"></div>
 
-  <!-- 地点追加モーダル -->
-  <div id="addModal" class="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-40 h-[70vh] flex flex-col modal-enter pb-safe" style="display: none;">
+  <!-- 地点検索モーダル -->
+  <div id="addModal" class="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-40 h-[85vh] flex flex-col modal-enter pb-safe shadow-2xl" style="display: none;">
     <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-      <h2 class="text-lg font-bold">地域を追加</h2>
+      <h2 class="text-lg font-bold">地点を検索</h2>
       <button id="closeModalBtn" class="p-2 bg-slate-100 rounded-full text-slate-600 active:bg-slate-200">
         <i class="ph ph-x text-lg"></i>
       </button>
     </div>
+    
+    <!-- 検索ボックス -->
+    <div class="p-4 border-b border-slate-100 bg-slate-50">
+      <form id="searchForm" class="flex gap-2">
+        <div class="relative flex-1">
+          <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg"></i>
+          <input type="text" id="searchInput" placeholder="例: 新宿区、横浜市" class="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all text-base" autocomplete="off">
+        </div>
+        <button type="submit" class="bg-blue-500 text-white px-5 rounded-xl font-bold active:bg-blue-600 transition-colors shadow-sm">検索</button>
+      </form>
+    </div>
+
+    <!-- 検索結果リスト -->
     <div class="flex-1 overflow-y-auto hide-scrollbar p-2">
-      <ul id="prefectureList" class="divide-y divide-slate-100">
-        <!-- リストはJSで動的に生成されます -->
+      <div id="searchLoading" class="hidden text-center py-8 text-slate-400">
+        <i class="ph ph-spinner-gap animate-spin text-3xl mb-2"></i>
+        <p class="text-sm">検索中...</p>
+      </div>
+      <ul id="searchResultsList" class="divide-y divide-slate-100">
+        <!-- 検索結果がここに入ります -->
+        <div class="text-center py-12 text-slate-400">
+          <i class="ph ph-buildings text-4xl mb-2 opacity-50"></i>
+          <p class="text-sm">市区町村名を入力して検索してください</p>
+        </div>
       </ul>
     </div>
   </div>
 
   <script>
-    // --- データ定義 ---
-    // 全国47都道府県の代表地点（県庁所在地等）の緯度経度
-    const PREFECTURES = [
-      { id: 'hokkaido', name: '札幌', lat: 43.0641, lon: 141.3469 },
-      { id: 'aomori', name: '青森', lat: 40.8244, lon: 140.7400 },
-      { id: 'iwate', name: '盛岡', lat: 39.7036, lon: 141.1525 },
-      { id: 'miyagi', name: '仙台', lat: 38.2688, lon: 140.8719 },
-      { id: 'akita', name: '秋田', lat: 39.7186, lon: 140.1025 },
-      { id: 'yamagata', name: '山形', lat: 38.2404, lon: 140.3633 },
-      { id: 'fukushima', name: '福島', lat: 37.7503, lon: 140.4675 },
-      { id: 'ibaraki', name: '水戸', lat: 36.3658, lon: 140.4714 },
-      { id: 'tochigi', name: '宇都宮', lat: 36.5658, lon: 139.8836 },
-      { id: 'gunma', name: '前橋', lat: 36.3911, lon: 139.0608 },
-      { id: 'saitama', name: 'さいたま', lat: 35.8617, lon: 139.6455 },
-      { id: 'chiba', name: '千葉', lat: 35.6047, lon: 140.1233 },
-      { id: 'tokyo', name: '東京', lat: 35.6895, lon: 139.6917 },
-      { id: 'kanagawa', name: '横浜', lat: 35.4477, lon: 139.6425 },
-      { id: 'niigata', name: '新潟', lat: 37.9022, lon: 139.0236 },
-      { id: 'toyama', name: '富山', lat: 36.6953, lon: 137.2114 },
-      { id: 'ishikawa', name: '金沢', lat: 36.5944, lon: 136.6256 },
-      { id: 'fukui', name: '福井', lat: 36.0641, lon: 136.2194 },
-      { id: 'yamanashi', name: '甲府', lat: 35.6639, lon: 138.5683 },
-      { id: 'nagano', name: '長野', lat: 36.6514, lon: 138.1811 },
-      { id: 'gifu', name: '岐阜', lat: 35.4233, lon: 136.7606 },
-      { id: 'shizuoka', name: '静岡', lat: 34.9756, lon: 138.3828 },
-      { id: 'aichi', name: '名古屋', lat: 35.1814, lon: 136.9063 },
-      { id: 'mie', name: '津', lat: 34.7303, lon: 136.5086 },
-      { id: 'shiga', name: '大津', lat: 35.0178, lon: 135.8544 },
-      { id: 'kyoto', name: '京都', lat: 35.0116, lon: 135.7680 },
-      { id: 'osaka', name: '大阪', lat: 34.6937, lon: 135.5022 },
-      { id: 'hyogo', name: '神戸', lat: 34.6913, lon: 135.1830 },
-      { id: 'nara', name: '奈良', lat: 34.6853, lon: 135.8047 },
-      { id: 'wakayama', name: '和歌山', lat: 34.2261, lon: 135.1675 },
-      { id: 'tottori', name: '鳥取', lat: 35.5011, lon: 134.2350 },
-      { id: 'shimane', name: '松江', lat: 35.4722, lon: 133.0506 },
-      { id: 'okayama', name: '岡山', lat: 34.6617, lon: 133.9350 },
-      { id: 'hiroshima', name: '広島', lat: 34.3852, lon: 132.4553 },
-      { id: 'yamaguchi', name: '山口', lat: 34.1858, lon: 131.4714 },
-      { id: 'tokushima', name: '徳島', lat: 34.0658, lon: 134.5594 },
-      { id: 'kagawa', name: '高松', lat: 34.3403, lon: 134.0433 },
-      { id: 'ehime', name: '松山', lat: 33.8392, lon: 132.7658 },
-      { id: 'kochi', name: '高知', lat: 33.5597, lon: 133.5311 },
-      { id: 'fukuoka', name: '福岡', lat: 33.5902, lon: 130.4017 },
-      { id: 'saga', name: '佐賀', lat: 33.2633, lon: 130.2989 },
-      { id: 'nagasaki', name: '長崎', lat: 32.7497, lon: 129.8736 },
-      { id: 'kumamoto', name: '熊本', lat: 32.8031, lon: 130.7078 },
-      { id: 'oita', name: '大分', lat: 33.2394, lon: 131.6125 },
-      { id: 'miyazaki', name: '宮崎', lat: 31.9111, lon: 131.4239 },
-      { id: 'kagoshima', name: '鹿児島', lat: 31.5603, lon: 130.5581 },
-      { id: 'okinawa', name: '那覇', lat: 26.2124, lon: 127.6809 }
-    ];
-
-    // WMO天気コードからアイコンクラスと色へのマッピング
+    // --- ユーティリティ ---
     function getWeatherInfo(code) {
-      if (code === 0 || code === 1) return { icon: 'ph-sun', color: 'text-orange-500' };
-      if (code === 2) return { icon: 'ph-cloud-sun', color: 'text-yellow-500' };
-      if (code === 3) return { icon: 'ph-cloud', color: 'text-slate-400' };
-      if ([45, 48].includes(code)) return { icon: 'ph-cloud-fog', color: 'text-slate-400' };
-      if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { icon: 'ph-cloud-rain', color: 'text-blue-500' };
-      if ([71, 73, 75, 77, 85, 86].includes(code)) return { icon: 'ph-snowflake', color: 'text-cyan-500' };
-      if ([95, 96, 99].includes(code)) return { icon: 'ph-cloud-lightning', color: 'text-purple-500' };
-      return { icon: 'ph-sun', color: 'text-slate-400' };
+      if (code === 0 || code === 1) return { icon: 'ph-sun', color: 'text-orange-500', name: '晴れ' };
+      if (code === 2) return { icon: 'ph-cloud-sun', color: 'text-yellow-500', name: '晴れ時々曇り' };
+      if (code === 3) return { icon: 'ph-cloud', color: 'text-slate-400', name: '曇り' };
+      if ([45, 48].includes(code)) return { icon: 'ph-cloud-fog', color: 'text-slate-400', name: '霧' };
+      if ([51, 53, 55, 56, 57].includes(code)) return { icon: 'ph-cloud-drizzle', color: 'text-blue-400', name: '霧雨' };
+      if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { icon: 'ph-cloud-rain', color: 'text-blue-500', name: '雨' };
+      if ([71, 73, 75, 77, 85, 86].includes(code)) return { icon: 'ph-snowflake', color: 'text-cyan-500', name: '雪' };
+      if ([95, 96, 99].includes(code)) return { icon: 'ph-cloud-lightning', color: 'text-purple-500', name: '雷雨' };
+      return { icon: 'ph-sun', color: 'text-slate-400', name: '不明' };
     }
 
     // --- 状態管理 ---
-    let savedLocations = JSON.parse(localStorage.getItem('fukan_weather_locations')) || ['tokyo', 'osaka', 'fukuoka'];
+    // 古い形式のデータ(IDのみ)があればクリアしてv2フォーマット(オブジェクト)にする
+    const storageKey = 'fukan_weather_locations_v2';
+    const defaultLocations = [
+      { id: 1850144, name: '東京都', admin: '東京都', lat: 35.6895, lon: 139.6917 },
+      { id: 1853909, name: '大阪市', admin: '大阪府', lat: 34.6937, lon: 135.5022 }
+    ];
+    let savedLocations = JSON.parse(localStorage.getItem(storageKey)) || defaultLocations;
     let isEditMode = false;
-    let weatherDataCache = {};
 
     // --- DOM要素 ---
     const grid = document.getElementById('weatherGrid');
     const emptyState = document.getElementById('emptyState');
     const loadingIndicator = document.getElementById('loadingIndicator');
-    const editBtn = document.getElementById('editBtn');
-    const addBtn = document.getElementById('addBtn');
-    const refreshBtn = document.getElementById('refreshBtn');
-    const addModal = document.getElementById('addModal');
-    const modalOverlay = document.getElementById('modalOverlay');
-    const closeModalBtn = document.getElementById('closeModalBtn');
-    const prefectureList = document.getElementById('prefectureList');
-
-    // --- 初期化 ---
-    function init() {
-      renderPrefectureList();
-      fetchAndRenderAll();
-    }
-
-    // --- API連携 ---
+    
+    // --- 天気データ取得 ---
     async function fetchWeather(lat, lon) {
-      // 降水確率を確実に取得するため、モデル指定をデフォルト(最適モデル自動選択)に変更
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo`;
       try {
         const res = await fetch(url);
@@ -265,80 +219,104 @@
       grid.innerHTML = '';
       loadingIndicator.classList.remove('hidden');
 
-      const promises = savedLocations.map(id => {
-        const pref = PREFECTURES.find(p => p.id === id);
-        if (!pref) return null;
-        return fetchWeather(pref.lat, pref.lon).then(data => ({ pref, data }));
+      const promises = savedLocations.map(loc => {
+        return fetchWeather(loc.lat, loc.lon).then(data => ({ loc, data }));
       });
 
       const results = await Promise.all(promises);
       loadingIndicator.classList.add('hidden');
-      grid.innerHTML = ''; // 再クリア
+      grid.innerHTML = '';
 
       results.forEach(res => {
         if (res && res.data) {
-          weatherDataCache[res.pref.id] = res.data;
-          renderCard(res.pref, res.data);
+          renderCard(res.loc, res.data);
         }
       });
     }
 
-    // --- レンダリング ---
-    function renderCard(pref, data) {
+    // --- カード描画 ---
+    function renderCard(loc, data) {
       const daily = data.daily;
       if (!daily || !daily.time) return;
 
-      // index 0: 今日, index 1: 明日, index 2: 明後日
-      const today = {
-        code: daily.weathercode[0],
-        maxTemp: Math.round(daily.temperature_2m_max[0]),
-        minTemp: Math.round(daily.temperature_2m_min[0]),
-        pop: daily.precipitation_probability_max ? daily.precipitation_probability_max[0] : 0
-      };
-      const tomorrow = {
-        code: daily.weathercode[1],
-        maxTemp: Math.round(daily.temperature_2m_max[1]),
-        minTemp: Math.round(daily.temperature_2m_min[1]),
-      };
+      // 日付データのパース (今日、明日、明後日)
+      const days = [0, 1, 2].map(i => {
+        const code = daily.weathercode[i];
+        const info = getWeatherInfo(code);
+        return {
+          dateLabel: i === 0 ? '今日' : i === 1 ? '明日' : '明後日',
+          icon: info.icon,
+          color: info.color,
+          maxTemp: Math.round(daily.temperature_2m_max[i]),
+          minTemp: Math.round(daily.temperature_2m_min[i]),
+          pop: daily.precipitation_probability_max ? daily.precipitation_probability_max[i] : 0
+        };
+      });
 
-      const todayWeather = getWeatherInfo(today.code);
-      const tomorrowWeather = getWeatherInfo(tomorrow.code);
+      const today = days[0];
+      const tomorrow = days[1];
+      const dayAfter = days[2];
 
-      // 編集モード用の削除ボタンHTML
       const deleteBadge = `
-        <button onclick="removeLocation('${pref.id}')" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md z-10 transition-transform ${isEditMode ? 'scale-100' : 'scale-0'}">
+        <button onclick="removeLocation(${loc.id})" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md z-10 transition-transform ${isEditMode ? 'scale-100' : 'scale-0'}">
           <i class="ph ph-x text-sm font-bold"></i>
         </button>
       `;
 
-      // 編集モード中はカードが少し揺れるアニメーションを追加
-      const editClass = isEditMode ? 'animate-pulse' : '';
-
       const cardHTML = `
-        <div class="relative bg-white rounded-2xl p-3 shadow-sm border border-slate-100 flex flex-col ${editClass}" data-id="${pref.id}">
+        <div class="relative bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col ${isEditMode ? 'animate-pulse' : ''}" data-id="${loc.id}">
           ${deleteBadge}
           
-          <div class="flex justify-between items-start mb-2">
-            <h3 class="font-bold text-slate-700 text-base leading-tight">${pref.name}</h3>
-            <div class="flex items-center text-xs font-medium ${today.pop >= 50 ? 'text-blue-500' : 'text-slate-400'}">
-              <i class="ph ph-drop mr-0.5"></i>${today.pop}%
-            </div>
+          <div class="mb-3">
+            <h3 class="font-bold text-slate-800 text-lg leading-tight">${loc.name}</h3>
+            ${loc.admin && loc.admin !== loc.name ? `<p class="text-xs text-slate-400">${loc.admin}</p>` : ''}
           </div>
           
-          <div class="flex flex-col items-center justify-center flex-1 my-1">
-            <i class="ph ${todayWeather.icon} ${todayWeather.color} text-5xl drop-shadow-sm mb-1"></i>
-            <div class="flex gap-2 text-sm font-semibold">
-              <span class="text-red-500">${today.maxTemp}°</span>
-              <span class="text-slate-300">/</span>
-              <span class="text-blue-500">${today.minTemp}°</span>
+          <!-- 今日 -->
+          <div class="flex items-center justify-between p-3 bg-blue-50/60 rounded-xl mb-3">
+            <div class="flex flex-col gap-1">
+              <span class="text-sm font-bold text-slate-600">今日</span>
+              <div class="flex items-center text-xs font-bold ${today.pop >= 40 ? 'text-blue-500' : 'text-slate-400'}">
+                <i class="ph ph-drop mr-0.5"></i>${today.pop}%
+              </div>
+            </div>
+            
+            <i class="ph ${today.icon} ${today.color} text-5xl drop-shadow-sm"></i>
+            
+            <div class="text-right flex flex-col items-end">
+              <span class="text-xl font-bold text-red-500 leading-none mb-1">${today.maxTemp}°</span>
+              <span class="text-lg font-bold text-blue-500 leading-none">${today.minTemp}°</span>
             </div>
           </div>
-          
-          <div class="mt-2 pt-2 border-t border-slate-50 flex items-center justify-between text-xs text-slate-500">
-            <span>明日</span>
-            <div class="flex items-center gap-1.5">
-              <i class="ph ${tomorrowWeather.icon} ${tomorrowWeather.color} text-lg"></i>
-              <span class="font-medium">${tomorrow.maxTemp}° <span class="text-slate-300 font-normal">/</span> ${tomorrow.minTemp}°</span>
+
+          <!-- 明日・明後日 -->
+          <div class="grid grid-cols-2 gap-3">
+            <!-- 明日 -->
+            <div class="p-2.5 bg-slate-50 rounded-xl flex flex-col items-center">
+              <span class="text-xs font-bold text-slate-500 mb-2">明日</span>
+              <i class="ph ${tomorrow.icon} ${tomorrow.color} text-3xl mb-2 drop-shadow-sm"></i>
+              <div class="text-sm font-bold mb-1">
+                <span class="text-red-500">${tomorrow.maxTemp}°</span>
+                <span class="text-slate-300 mx-0.5">/</span>
+                <span class="text-blue-500">${tomorrow.minTemp}°</span>
+              </div>
+              <span class="text-[10px] font-bold ${tomorrow.pop >= 40 ? 'text-blue-500' : 'text-slate-400'}">
+                <i class="ph ph-drop"></i> ${tomorrow.pop}%
+              </span>
+            </div>
+
+            <!-- 明後日 -->
+            <div class="p-2.5 bg-slate-50 rounded-xl flex flex-col items-center">
+              <span class="text-xs font-bold text-slate-500 mb-2">明後日</span>
+              <i class="ph ${dayAfter.icon} ${dayAfter.color} text-3xl mb-2 drop-shadow-sm"></i>
+              <div class="text-sm font-bold mb-1">
+                <span class="text-red-500">${dayAfter.maxTemp}°</span>
+                <span class="text-slate-300 mx-0.5">/</span>
+                <span class="text-blue-500">${dayAfter.minTemp}°</span>
+              </div>
+              <span class="text-[10px] font-bold ${dayAfter.pop >= 40 ? 'text-blue-500' : 'text-slate-400'}">
+                <i class="ph ph-drop"></i> ${dayAfter.pop}%
+              </span>
             </div>
           </div>
         </div>
@@ -347,41 +325,84 @@
       grid.insertAdjacentHTML('beforeend', cardHTML);
     }
 
-    function renderPrefectureList() {
-      prefectureList.innerHTML = PREFECTURES.map(pref => {
-        const isAdded = savedLocations.includes(pref.id);
-        return `
-          <li class="px-2 py-1">
-            <button 
-              onclick="addLocation('${pref.id}')" 
-              class="w-full text-left px-4 py-3 rounded-xl flex items-center justify-between active:bg-slate-100 transition-colors ${isAdded ? 'opacity-50 cursor-not-allowed' : ''}"
-              ${isAdded ? 'disabled' : ''}
-            >
-              <span class="font-medium text-slate-700">${pref.name}</span>
-              ${isAdded ? '<i class="ph ph-check text-blue-500 text-lg"></i>' : '<i class="ph ph-plus text-slate-400 text-lg"></i>'}
-            </button>
-          </li>
-        `;
-      }).join('');
-    }
+    // --- 地点検索 (Geocoding API) ---
+    const searchForm = document.getElementById('searchForm');
+    const searchInput = document.getElementById('searchInput');
+    const searchResultsList = document.getElementById('searchResultsList');
+    const searchLoading = document.getElementById('searchLoading');
 
-    // --- インタラクション ---
-    window.addLocation = function(id) {
-      if (!savedLocations.includes(id)) {
-        savedLocations.push(id);
-        saveLocations();
-        fetchAndRenderAll(); // 再描画
+    searchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const query = searchInput.value.trim();
+      if (!query) return;
+
+      // UI状態更新
+      searchInput.blur();
+      searchResultsList.innerHTML = '';
+      searchLoading.classList.remove('hidden');
+
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=10&language=ja&format=json`;
+      
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        searchLoading.classList.add('hidden');
+
+        if (!data.results || data.results.length === 0) {
+          searchResultsList.innerHTML = `
+            <div class="text-center py-8 text-slate-500">
+              <p>「${query}」が見つかりませんでした。</p>
+              <p class="text-xs text-slate-400 mt-2">別のキーワードでお試しください</p>
+            </div>
+          `;
+          return;
+        }
+
+        searchResultsList.innerHTML = data.results.map(result => {
+          // すでに登録済みかチェック
+          const isAdded = savedLocations.some(loc => loc.id === result.id);
+          const adminName = result.admin1 ? result.admin1 : (result.country || '');
+          
+          return `
+            <li class="px-2 py-1">
+              <button 
+                onclick="addLocation(${result.id}, '${result.name}', '${adminName}', ${result.latitude}, ${result.longitude})" 
+                class="w-full text-left px-4 py-3 rounded-xl flex items-center justify-between active:bg-slate-100 transition-colors ${isAdded ? 'opacity-50 cursor-not-allowed' : ''}"
+                ${isAdded ? 'disabled' : ''}
+              >
+                <div>
+                  <span class="font-bold text-slate-700">${result.name}</span>
+                  <span class="text-xs text-slate-400 ml-2">${adminName}</span>
+                </div>
+                ${isAdded ? '<i class="ph ph-check-circle text-blue-500 text-xl"></i>' : '<i class="ph ph-plus-circle text-slate-300 text-xl"></i>'}
+              </button>
+            </li>
+          `;
+        }).join('');
+
+      } catch (err) {
+        searchLoading.classList.add('hidden');
+        searchResultsList.innerHTML = `<div class="text-center py-8 text-red-500">通信エラーが発生しました</div>`;
+      }
+    });
+
+    // --- データ操作 ---
+    window.addLocation = function(id, name, admin, lat, lon) {
+      if (!savedLocations.some(loc => loc.id === id)) {
+        savedLocations.push({ id, name, admin, lat, lon });
+        localStorage.setItem(storageKey, JSON.stringify(savedLocations));
+        fetchAndRenderAll();
       }
       closeModal();
     };
 
     window.removeLocation = function(id) {
-      savedLocations = savedLocations.filter(locId => locId !== id);
-      saveLocations();
-      // DOMから直接削除してアニメーションさせることも可能だが、今回はシンプルに再描画
+      savedLocations = savedLocations.filter(loc => loc.id !== id);
+      localStorage.setItem(storageKey, JSON.stringify(savedLocations));
+      
       const card = document.querySelector(`[data-id="${id}"]`);
       if(card) {
-        card.style.transform = 'scale(0)';
+        card.style.transform = 'scale(0.9)';
         card.style.opacity = '0';
         card.style.transition = 'all 0.2s ease-out';
         setTimeout(() => fetchAndRenderAll(), 200);
@@ -390,45 +411,50 @@
       }
     };
 
-    function saveLocations() {
-      localStorage.setItem('fukan_weather_locations', JSON.stringify(savedLocations));
-      renderPrefectureList(); // リストのチェックマーク更新のため
-    }
-
-    // 編集モード切替
+    // --- モーダル・UI制御 ---
+    const editBtn = document.getElementById('editBtn');
     editBtn.addEventListener('click', () => {
       isEditMode = !isEditMode;
       editBtn.textContent = isEditMode ? '完了' : '編集';
       editBtn.classList.toggle('text-red-500', isEditMode);
       editBtn.classList.toggle('text-blue-500', !isEditMode);
       
-      // 全カードの削除ボタン表示切替
       document.querySelectorAll('#weatherGrid > div').forEach(card => {
         const badge = card.querySelector('button');
         if (isEditMode) {
           badge.classList.remove('scale-0');
           badge.classList.add('scale-100');
-          // card.classList.add('animate-pulse'); // 簡易的な揺れを表現する場合
         } else {
           badge.classList.remove('scale-100');
           badge.classList.add('scale-0');
-          // card.classList.remove('animate-pulse');
         }
       });
     });
 
-    // モーダル操作
+    const addModal = document.getElementById('addModal');
+    const modalOverlay = document.getElementById('modalOverlay');
+
     function openModal() {
-      renderPrefectureList();
+      // 検索状態をリセット
+      searchInput.value = '';
+      searchResultsList.innerHTML = `
+        <div class="text-center py-12 text-slate-400">
+          <i class="ph ph-buildings text-4xl mb-2 opacity-50"></i>
+          <p class="text-sm">市区町村名を入力して検索してください</p>
+        </div>
+      `;
+      
       addModal.style.display = 'flex';
       modalOverlay.classList.remove('hidden');
       
-      // アニメーション用
       requestAnimationFrame(() => {
         addModal.classList.remove('modal-enter');
         addModal.classList.add('modal-enter-active');
         modalOverlay.classList.remove('opacity-0');
         modalOverlay.classList.add('opacity-100');
+        
+        // 少し遅延させてからフォーカスを当てる（モバイルSafariのキーボード対策）
+        setTimeout(() => searchInput.focus(), 300);
       });
     }
 
@@ -437,6 +463,7 @@
       addModal.classList.add('modal-exit-active');
       modalOverlay.classList.remove('opacity-100');
       modalOverlay.classList.add('opacity-0');
+      searchInput.blur(); // キーボードを閉じる
 
       setTimeout(() => {
         addModal.style.display = 'none';
@@ -446,11 +473,11 @@
       }, 300);
     }
 
-    addBtn.addEventListener('click', openModal);
-    closeModalBtn.addEventListener('click', closeModal);
+    document.getElementById('addBtn').addEventListener('click', openModal);
+    document.getElementById('closeModalBtn').addEventListener('click', closeModal);
     modalOverlay.addEventListener('click', closeModal);
 
-    // 更新ボタン
+    const refreshBtn = document.getElementById('refreshBtn');
     refreshBtn.addEventListener('click', () => {
       const icon = refreshBtn.querySelector('i');
       icon.classList.add('animate-spin');
@@ -460,7 +487,7 @@
     });
 
     // 起動
-    init();
+    fetchAndRenderAll();
 
   </script>
 </body>
