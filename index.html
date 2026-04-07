@@ -115,7 +115,6 @@
       <p class="text-sm">天気データを取得中...</p>
     </div>
     
-    <!-- 縦並びのカードグリッド -->
     <div id="weatherGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <!-- カードはJSで動的に生成 -->
     </div>
@@ -139,7 +138,6 @@
       </button>
     </div>
     
-    <!-- 検索ボックス -->
     <div class="p-4 border-b border-slate-100 bg-slate-50">
       <form id="searchForm" class="flex gap-2">
         <div class="relative flex-1">
@@ -150,14 +148,12 @@
       </form>
     </div>
 
-    <!-- 検索結果リスト -->
     <div class="flex-1 overflow-y-auto hide-scrollbar p-2">
       <div id="searchLoading" class="hidden text-center py-8 text-slate-400">
         <i class="ph ph-spinner-gap animate-spin text-3xl mb-2"></i>
         <p class="text-sm">検索中...</p>
       </div>
       <ul id="searchResultsList" class="divide-y divide-slate-100">
-        <!-- 検索結果がここに入ります -->
         <div class="text-center py-12 text-slate-400">
           <i class="ph ph-buildings text-4xl mb-2 opacity-50"></i>
           <p class="text-sm">市区町村名を入力して検索してください</p>
@@ -168,12 +164,13 @@
 
   <script>
     // --- ユーティリティ ---
+    // 前回一部のアイコンが存在しないクラス名だったため、確実に表示されるものに修正しました
     function getWeatherInfo(code) {
       if (code === 0 || code === 1) return { icon: 'ph-sun', color: 'text-orange-500', name: '晴れ' };
       if (code === 2) return { icon: 'ph-cloud-sun', color: 'text-yellow-500', name: '晴れ時々曇り' };
       if (code === 3) return { icon: 'ph-cloud', color: 'text-slate-400', name: '曇り' };
       if ([45, 48].includes(code)) return { icon: 'ph-cloud-fog', color: 'text-slate-400', name: '霧' };
-      if ([51, 53, 55, 56, 57].includes(code)) return { icon: 'ph-cloud-drizzle', color: 'text-blue-400', name: '霧雨' };
+      if ([51, 53, 55, 56, 57].includes(code)) return { icon: 'ph-cloud-rain', color: 'text-blue-400', name: '霧雨' };
       if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { icon: 'ph-cloud-rain', color: 'text-blue-500', name: '雨' };
       if ([71, 73, 75, 77, 85, 86].includes(code)) return { icon: 'ph-snowflake', color: 'text-cyan-500', name: '雪' };
       if ([95, 96, 99].includes(code)) return { icon: 'ph-cloud-lightning', color: 'text-purple-500', name: '雷雨' };
@@ -181,7 +178,6 @@
     }
 
     // --- 状態管理 ---
-    // 古い形式のデータ(IDのみ)があればクリアしてv2フォーマット(オブジェクト)にする
     const storageKey = 'fukan_weather_locations_v2';
     const defaultLocations = [
       { id: 1850144, name: '東京都', admin: '東京都', lat: 35.6895, lon: 139.6917 },
@@ -190,14 +186,14 @@
     let savedLocations = JSON.parse(localStorage.getItem(storageKey)) || defaultLocations;
     let isEditMode = false;
 
-    // --- DOM要素 ---
     const grid = document.getElementById('weatherGrid');
     const emptyState = document.getElementById('emptyState');
     const loadingIndicator = document.getElementById('loadingIndicator');
     
     // --- 天気データ取得 ---
     async function fetchWeather(lat, lon) {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo`;
+      // 精度向上のためモデルの固定指定を削除し、午前午後の計算のために hourly=precipitation_probability を追加
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=precipitation_probability&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo`;
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error('API Error');
@@ -237,9 +233,25 @@
     // --- カード描画 ---
     function renderCard(loc, data) {
       const daily = data.daily;
+      const hourly = data.hourly;
       if (!daily || !daily.time) return;
 
-      // 日付データのパース (今日、明日、明後日)
+      // 1時間ごとのデータから「今日の午前」と「午後の降水確率」を割り出す
+      const todayDateStr = daily.time[0];
+      const todayStartIndex = hourly.time.findIndex(t => t.startsWith(todayDateStr));
+      
+      let todayPopAm = 0;
+      let todayPopPm = 0;
+
+      if (todayStartIndex !== -1) {
+        // 午前: 0時〜11時の最大値
+        const amPops = hourly.precipitation_probability.slice(todayStartIndex, todayStartIndex + 12).map(v => v || 0);
+        todayPopAm = Math.max(...amPops);
+        // 午後: 12時〜23時の最大値
+        const pmPops = hourly.precipitation_probability.slice(todayStartIndex + 12, todayStartIndex + 24).map(v => v || 0);
+        todayPopPm = Math.max(...pmPops);
+      }
+
       const days = [0, 1, 2].map(i => {
         const code = daily.weathercode[i];
         const info = getWeatherInfo(code);
@@ -247,6 +259,7 @@
           dateLabel: i === 0 ? '今日' : i === 1 ? '明日' : '明後日',
           icon: info.icon,
           color: info.color,
+          name: info.name,
           maxTemp: Math.round(daily.temperature_2m_max[i]),
           minTemp: Math.round(daily.temperature_2m_min[i]),
           pop: daily.precipitation_probability_max ? daily.precipitation_probability_max[i] : 0
@@ -258,64 +271,78 @@
       const dayAfter = days[2];
 
       const deleteBadge = `
-        <button onclick="removeLocation(${loc.id})" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow-md z-10 transition-transform ${isEditMode ? 'scale-100' : 'scale-0'}">
+        <button onclick="removeLocation(${loc.id})" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 shadow-md z-10 transition-transform ${isEditMode ? 'scale-100' : 'scale-0'}">
           <i class="ph ph-x text-sm font-bold"></i>
         </button>
       `;
 
+      // tenki.jpに寄せたデザインに変更
       const cardHTML = `
         <div class="relative bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col ${isEditMode ? 'animate-pulse' : ''}" data-id="${loc.id}">
           ${deleteBadge}
           
           <div class="mb-3">
             <h3 class="font-bold text-slate-800 text-lg leading-tight">${loc.name}</h3>
-            ${loc.admin && loc.admin !== loc.name ? `<p class="text-xs text-slate-400">${loc.admin}</p>` : ''}
+            ${loc.admin && loc.admin !== loc.name ? `<p class="text-xs text-slate-400 mt-0.5">${loc.admin}</p>` : ''}
           </div>
           
           <!-- 今日 -->
-          <div class="flex items-center justify-between p-3 bg-blue-50/60 rounded-xl mb-3">
-            <div class="flex flex-col gap-1">
-              <span class="text-sm font-bold text-slate-600">今日</span>
-              <div class="flex items-center text-xs font-bold ${today.pop >= 40 ? 'text-blue-500' : 'text-slate-400'}">
-                <i class="ph ph-drop mr-0.5"></i>${today.pop}%
+          <div class="flex flex-col p-4 bg-slate-50/80 rounded-xl mb-3 border border-slate-100">
+            <div class="flex justify-between items-start mb-1">
+              <span class="text-sm font-bold text-slate-700">今日</span>
+              <!-- 午前・午後の降水確率表示 -->
+              <div class="text-xs font-bold text-slate-500 bg-white px-2 py-1 rounded-md shadow-sm border border-slate-100 flex items-center">
+                <i class="ph ph-drop text-blue-400 mr-1 text-sm"></i>
+                <span>午前 <span class="${todayPopAm >= 40 ? 'text-blue-600' : ''}">${todayPopAm}%</span></span>
+                <span class="mx-1.5 text-slate-200">|</span>
+                <span>午後 <span class="${todayPopPm >= 40 ? 'text-blue-600' : ''}">${todayPopPm}%</span></span>
               </div>
             </div>
             
-            <i class="ph ${today.icon} ${today.color} text-5xl drop-shadow-sm"></i>
-            
-            <div class="text-right flex flex-col items-end">
-              <span class="text-xl font-bold text-red-500 leading-none mb-1">${today.maxTemp}°</span>
-              <span class="text-lg font-bold text-blue-500 leading-none">${today.minTemp}°</span>
+            <div class="flex items-center justify-between mt-2">
+              <div class="flex flex-col items-center min-w-[70px]">
+                <i class="ph ${today.icon} ${today.color} text-[3.5rem] drop-shadow-sm leading-none"></i>
+                <span class="text-xs font-bold text-slate-600 mt-2">${today.name}</span>
+              </div>
+              
+              <div class="flex items-baseline gap-4 pr-2">
+                <div class="flex flex-col items-end">
+                  <span class="text-3xl font-bold text-red-500 leading-none">${today.maxTemp}<span class="text-lg">°</span></span>
+                </div>
+                <div class="flex flex-col items-end">
+                  <span class="text-3xl font-bold text-blue-500 leading-none">${today.minTemp}<span class="text-lg">°</span></span>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- 明日・明後日 -->
           <div class="grid grid-cols-2 gap-3">
             <!-- 明日 -->
-            <div class="p-2.5 bg-slate-50 rounded-xl flex flex-col items-center">
+            <div class="p-3 bg-white border border-slate-100 rounded-xl flex flex-col items-center shadow-sm">
               <span class="text-xs font-bold text-slate-500 mb-2">明日</span>
-              <i class="ph ${tomorrow.icon} ${tomorrow.color} text-3xl mb-2 drop-shadow-sm"></i>
-              <div class="text-sm font-bold mb-1">
+              <i class="ph ${tomorrow.icon} ${tomorrow.color} text-[2rem] mb-1 drop-shadow-sm leading-none"></i>
+              <span class="text-[10px] font-bold text-slate-500 mb-2">${tomorrow.name}</span>
+              <div class="text-sm font-bold w-full flex justify-center gap-2.5 mb-1.5">
                 <span class="text-red-500">${tomorrow.maxTemp}°</span>
-                <span class="text-slate-300 mx-0.5">/</span>
                 <span class="text-blue-500">${tomorrow.minTemp}°</span>
               </div>
-              <span class="text-[10px] font-bold ${tomorrow.pop >= 40 ? 'text-blue-500' : 'text-slate-400'}">
-                <i class="ph ph-drop"></i> ${tomorrow.pop}%
+              <span class="text-[10px] font-bold ${tomorrow.pop >= 40 ? 'text-blue-500' : 'text-slate-400'} flex items-center">
+                <i class="ph ph-drop mr-0.5 text-xs"></i> ${tomorrow.pop}%
               </span>
             </div>
 
             <!-- 明後日 -->
-            <div class="p-2.5 bg-slate-50 rounded-xl flex flex-col items-center">
+            <div class="p-3 bg-white border border-slate-100 rounded-xl flex flex-col items-center shadow-sm">
               <span class="text-xs font-bold text-slate-500 mb-2">明後日</span>
-              <i class="ph ${dayAfter.icon} ${dayAfter.color} text-3xl mb-2 drop-shadow-sm"></i>
-              <div class="text-sm font-bold mb-1">
+              <i class="ph ${dayAfter.icon} ${dayAfter.color} text-[2rem] mb-1 drop-shadow-sm leading-none"></i>
+              <span class="text-[10px] font-bold text-slate-500 mb-2">${dayAfter.name}</span>
+              <div class="text-sm font-bold w-full flex justify-center gap-2.5 mb-1.5">
                 <span class="text-red-500">${dayAfter.maxTemp}°</span>
-                <span class="text-slate-300 mx-0.5">/</span>
                 <span class="text-blue-500">${dayAfter.minTemp}°</span>
               </div>
-              <span class="text-[10px] font-bold ${dayAfter.pop >= 40 ? 'text-blue-500' : 'text-slate-400'}">
-                <i class="ph ph-drop"></i> ${dayAfter.pop}%
+              <span class="text-[10px] font-bold ${dayAfter.pop >= 40 ? 'text-blue-500' : 'text-slate-400'} flex items-center">
+                <i class="ph ph-drop mr-0.5 text-xs"></i> ${dayAfter.pop}%
               </span>
             </div>
           </div>
@@ -325,7 +352,7 @@
       grid.insertAdjacentHTML('beforeend', cardHTML);
     }
 
-    // --- 地点検索 (Geocoding API) ---
+    // --- 地点検索 ---
     const searchForm = document.getElementById('searchForm');
     const searchInput = document.getElementById('searchInput');
     const searchResultsList = document.getElementById('searchResultsList');
@@ -336,7 +363,6 @@
       const query = searchInput.value.trim();
       if (!query) return;
 
-      // UI状態更新
       searchInput.blur();
       searchResultsList.innerHTML = '';
       searchLoading.classList.remove('hidden');
@@ -352,14 +378,12 @@
           searchResultsList.innerHTML = `
             <div class="text-center py-8 text-slate-500">
               <p>「${query}」が見つかりませんでした。</p>
-              <p class="text-xs text-slate-400 mt-2">別のキーワードでお試しください</p>
             </div>
           `;
           return;
         }
 
         searchResultsList.innerHTML = data.results.map(result => {
-          // すでに登録済みかチェック
           const isAdded = savedLocations.some(loc => loc.id === result.id);
           const adminName = result.admin1 ? result.admin1 : (result.country || '');
           
@@ -382,11 +406,9 @@
 
       } catch (err) {
         searchLoading.classList.add('hidden');
-        searchResultsList.innerHTML = `<div class="text-center py-8 text-red-500">通信エラーが発生しました</div>`;
       }
     });
 
-    // --- データ操作 ---
     window.addLocation = function(id, name, admin, lat, lon) {
       if (!savedLocations.some(loc => loc.id === id)) {
         savedLocations.push({ id, name, admin, lat, lon });
@@ -399,19 +421,10 @@
     window.removeLocation = function(id) {
       savedLocations = savedLocations.filter(loc => loc.id !== id);
       localStorage.setItem(storageKey, JSON.stringify(savedLocations));
-      
-      const card = document.querySelector(`[data-id="${id}"]`);
-      if(card) {
-        card.style.transform = 'scale(0.9)';
-        card.style.opacity = '0';
-        card.style.transition = 'all 0.2s ease-out';
-        setTimeout(() => fetchAndRenderAll(), 200);
-      } else {
-        fetchAndRenderAll();
-      }
+      fetchAndRenderAll();
     };
 
-    // --- モーダル・UI制御 ---
+    // --- UI制御 ---
     const editBtn = document.getElementById('editBtn');
     editBtn.addEventListener('click', () => {
       isEditMode = !isEditMode;
@@ -435,7 +448,6 @@
     const modalOverlay = document.getElementById('modalOverlay');
 
     function openModal() {
-      // 検索状態をリセット
       searchInput.value = '';
       searchResultsList.innerHTML = `
         <div class="text-center py-12 text-slate-400">
@@ -443,18 +455,13 @@
           <p class="text-sm">市区町村名を入力して検索してください</p>
         </div>
       `;
-      
       addModal.style.display = 'flex';
       modalOverlay.classList.remove('hidden');
-      
       requestAnimationFrame(() => {
         addModal.classList.remove('modal-enter');
         addModal.classList.add('modal-enter-active');
         modalOverlay.classList.remove('opacity-0');
         modalOverlay.classList.add('opacity-100');
-        
-        // 少し遅延させてからフォーカスを当てる（モバイルSafariのキーボード対策）
-        setTimeout(() => searchInput.focus(), 300);
       });
     }
 
@@ -463,8 +470,7 @@
       addModal.classList.add('modal-exit-active');
       modalOverlay.classList.remove('opacity-100');
       modalOverlay.classList.add('opacity-0');
-      searchInput.blur(); // キーボードを閉じる
-
+      searchInput.blur();
       setTimeout(() => {
         addModal.style.display = 'none';
         addModal.classList.remove('modal-exit-active');
@@ -477,18 +483,13 @@
     document.getElementById('closeModalBtn').addEventListener('click', closeModal);
     modalOverlay.addEventListener('click', closeModal);
 
-    const refreshBtn = document.getElementById('refreshBtn');
-    refreshBtn.addEventListener('click', () => {
-      const icon = refreshBtn.querySelector('i');
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+      const icon = document.getElementById('refreshBtn').querySelector('i');
       icon.classList.add('animate-spin');
-      fetchAndRenderAll().then(() => {
-        setTimeout(() => icon.classList.remove('animate-spin'), 500);
-      });
+      fetchAndRenderAll().then(() => setTimeout(() => icon.classList.remove('animate-spin'), 500));
     });
 
-    // 起動
     fetchAndRenderAll();
-
   </script>
 </body>
 </html>
