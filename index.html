@@ -290,21 +290,44 @@
         const dateObj = new Date(dailyTimes[i]);
         const m = dateObj.getMonth() + 1;
         const d = dateObj.getDate();
-        const dayStr = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+        const dayOfWeek = dateObj.getDay();
+        const dayStr = ['日', '月', '火', '水', '木', '金', '土'][dayOfWeek];
         
         const isToday = i === 0;
         const isTomorrow = i === 1;
+
+        // 色分けロジック
+        let dayColor = '';
+        let labelColor = '';
+        let stickyBgClass = '';
+        let cellBgClass = '';
+
+        if (isToday) {
+          dayColor = 'text-emerald-700';
+          labelColor = 'text-emerald-600';
+          stickyBgClass = 'bg-emerald-50';
+          cellBgClass = 'bg-emerald-50/40';
+        } else if (dayOfWeek === 0) { // 日曜
+          dayColor = 'text-red-600';
+          labelColor = 'text-red-500';
+          stickyBgClass = 'bg-red-50/60';
+          cellBgClass = 'bg-white';
+        } else if (dayOfWeek === 6) { // 土曜
+          dayColor = 'text-blue-600';
+          labelColor = 'text-blue-500';
+          stickyBgClass = 'bg-blue-50/60';
+          cellBgClass = 'bg-white';
+        } else { // 平日
+          dayColor = 'text-slate-700';
+          labelColor = 'text-slate-500';
+          stickyBgClass = 'bg-slate-50';
+          cellBgClass = 'bg-white';
+        }
         
         let dateLabel = '';
-        if (isToday) dateLabel = '<div class="text-[10px] font-bold text-blue-600 mb-0.5 leading-none">今日</div>';
-        else if (isTomorrow) dateLabel = '<div class="text-[10px] font-bold text-slate-500 mb-0.5 leading-none">明日</div>';
-        else dateLabel = `<div class="text-[9px] font-bold text-slate-400 mb-0.5 leading-none">${dayStr}曜</div>`;
-
-        const dateColor = isToday ? 'text-blue-700' : 'text-slate-700';
-        
-        // 今日の行だけハイライト色を設定
-        const stickyBgClass = isToday ? 'bg-[#f0f7ff]' : 'bg-[#f8fafc]';
-        const cellBgClass = isToday ? 'bg-[#f8faff]' : 'bg-white';
+        if (isToday) dateLabel = `<div class="text-[10px] font-bold ${labelColor} mb-0.5 leading-none">今日</div>`;
+        else if (isTomorrow) dateLabel = `<div class="text-[10px] font-bold ${labelColor} mb-0.5 leading-none">明日</div>`;
+        else dateLabel = `<div class="text-[9px] font-bold ${labelColor} mb-0.5 leading-none">${dayStr}曜</div>`;
 
         html += `<tr>`;
         
@@ -313,7 +336,7 @@
           <th class="sticky left-0 z-10 ${stickyBgClass} border-b border-r border-slate-200 text-center py-3 px-1 align-middle last:border-b-0 shadow-[1px_0_0_0_rgba(226,232,240,1)]">
             <div class="flex flex-col items-center justify-center">
               ${dateLabel}
-              <div class="text-xs sm:text-sm font-bold ${dateColor}">${m}/${d}</div>
+              <div class="text-xs sm:text-sm font-bold ${dayColor}">${m}/${d}</div>
             </div>
           </th>
         `;
@@ -339,53 +362,35 @@
             let popDisplay = '';
             let umbrellaHtml = '';
 
-            if (isToday) {
-              const hourly = res.data.hourly;
-              let popAm = 0, popPm = 0;
-              if (hourly && hourly.time && hourly.precipitation_probability) {
-                 const startIndex = hourly.time.findIndex(t => t.startsWith(dailyTimes[i]));
-                 if (startIndex !== -1) {
-                    const amPops = hourly.precipitation_probability.slice(startIndex, startIndex + 12).map(v => v || 0);
-                    if (amPops.length > 0) popAm = Math.max(...amPops);
-                    const pmPops = hourly.precipitation_probability.slice(startIndex + 12, startIndex + 24).map(v => v || 0);
-                    if (pmPops.length > 0) popPm = Math.max(...pmPops);
-                 }
-              }
-
-              // 傘判定 (今日の最高降水確率を使用)
-              const maxPop = Math.max(popAm, popPm);
-              const umbrella = getUmbrellaStatus(code, maxPop);
-              if (umbrella) {
-                umbrellaHtml = `<div class="absolute top-1.5 right-1.5 flex items-center gap-0.5 ${umbrella.bg} backdrop-blur-sm rounded text-[9px] px-1 py-0.5 border border-white/60 z-10"><i class="ph ${umbrella.icon} ${umbrella.color}"></i><span class="font-bold ${umbrella.color} leading-none">${umbrella.label}</span></div>`;
-              }
-
-              // 今日は前・後の降水確率を横並びで表示
-              popDisplay = `
-                ${umbrellaHtml}
-                <div class="mt-2 text-[9px] font-bold text-slate-500 flex items-center justify-center w-full whitespace-nowrap">
-                  <span class="text-slate-400 mr-0.5">前</span>
-                  <span class="${popAm >= 40 ? 'text-blue-600' : 'text-blue-400'} w-[18px] text-left">${popAm}%</span>
-                  <span class="mx-0.5 text-slate-200 font-normal">|</span>
-                  <span class="text-slate-400 mr-0.5">後</span>
-                  <span class="${popPm >= 40 ? 'text-blue-600' : 'text-blue-400'} w-[18px] text-left">${popPm}%</span>
-                </div>
-              `;
-            } else {
-              const pop = daily.precipitation_probability_max && daily.precipitation_probability_max[i] !== undefined ? daily.precipitation_probability_max[i] : 0;
-              
-              // 傘判定
-              const umbrella = getUmbrellaStatus(code, pop);
-              if (umbrella) {
-                umbrellaHtml = `<div class="absolute top-1.5 right-1.5 flex items-center gap-0.5 ${umbrella.bg} backdrop-blur-sm rounded text-[9px] px-1 py-0.5 border border-white/60 z-10"><i class="ph ${umbrella.icon} ${umbrella.color}"></i><span class="font-bold ${umbrella.color} leading-none">${umbrella.label}</span></div>`;
-              }
-
-              popDisplay = `
-                ${umbrellaHtml}
-                <div class="mt-2 text-[10px] font-bold ${pop >= 40 ? 'text-blue-600' : 'text-slate-400'} flex items-center justify-center">
-                  <i class="ph ph-drop mr-0.5"></i>${pop}%
-                </div>
-              `;
+            const hourly = res.data.hourly;
+            let popAm = 0, popPm = 0;
+            if (hourly && hourly.time && hourly.precipitation_probability) {
+               const startIndex = hourly.time.findIndex(t => t.startsWith(dailyTimes[i]));
+               if (startIndex !== -1) {
+                  const amPops = hourly.precipitation_probability.slice(startIndex, startIndex + 12).map(v => v || 0);
+                  if (amPops.length > 0) popAm = Math.max(...amPops);
+                  const pmPops = hourly.precipitation_probability.slice(startIndex + 12, startIndex + 24).map(v => v || 0);
+                  if (pmPops.length > 0) popPm = Math.max(...pmPops);
+               }
             }
+
+            // 傘判定 (1日の最高降水確率を使用)
+            const maxPop = Math.max(popAm, popPm);
+            const umbrella = getUmbrellaStatus(code, maxPop);
+            if (umbrella) {
+              umbrellaHtml = `<div class="absolute top-1.5 right-1.5 flex items-center gap-0.5 ${umbrella.bg} backdrop-blur-sm rounded text-[9px] px-1 py-0.5 border border-white/60 z-10"><i class="ph ${umbrella.icon} ${umbrella.color}"></i><span class="font-bold ${umbrella.color} leading-none">${umbrella.label}</span></div>`;
+            }
+
+            popDisplay = `
+              ${umbrellaHtml}
+              <div class="mt-2 text-[9px] font-bold text-slate-500 flex items-center justify-center w-full whitespace-nowrap">
+                <span class="text-slate-400 mr-0.5">前</span>
+                <span class="${popAm >= 40 ? 'text-blue-600' : 'text-blue-400'} w-[18px] text-left">${popAm}%</span>
+                <span class="mx-0.5 text-slate-200 font-normal">|</span>
+                <span class="text-slate-400 mr-0.5">後</span>
+                <span class="${popPm >= 40 ? 'text-blue-600' : 'text-blue-400'} w-[18px] text-left">${popPm}%</span>
+              </div>
+            `;
 
             html += `
               <div class="flex flex-col items-center justify-center">
