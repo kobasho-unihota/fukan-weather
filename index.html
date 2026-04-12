@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="俯瞰天気">
-  <title>俯瞰天気</title>
+  <meta name="apple-mobile-web-app-title" content="SoraGrid">
+  <title>SoraGrid</title>
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -60,8 +60,8 @@
     const iconBase64 = 'data:image/svg+xml;base64,' + btoa(iconSvg);
 
     const manifest = {
-      "name": "俯瞰天気",
-      "short_name": "俯瞰天気",
+      "name": "SoraGrid",
+      "short_name": "SoraGrid",
       "start_url": ".",
       "display": "standalone",
       "background_color": "#f8fafc",
@@ -96,7 +96,7 @@
   <header class="fixed top-0 left-0 right-0 z-20 bg-white/90 backdrop-blur-md border-b border-slate-200 pt-safe shadow-sm">
     <div class="flex items-center justify-between px-4 h-14">
       <button id="editBtn" class="text-blue-500 font-medium px-2 py-1 active:opacity-50 transition-opacity">編集</button>
-      <h1 class="text-lg font-bold">俯瞰天気</h1>
+      <h1 class="text-lg font-bold">SoraGrid</h1>
       <div class="flex items-center gap-1">
         <button id="refreshBtn" class="p-2 text-slate-600 active:opacity-50 transition-opacity rounded-full">
           <i class="ph ph-arrows-clockwise text-xl"></i>
@@ -109,14 +109,15 @@
   </header>
 
   <!-- メインコンテンツ -->
-  <main class="flex-1 overflow-y-auto mt-14 pb-safe px-4 py-4 hide-scrollbar">
+  <main class="flex-1 overflow-y-auto mt-14 pb-safe px-3 sm:px-4 py-4 hide-scrollbar">
     <div id="loadingIndicator" class="flex flex-col items-center justify-center py-20 text-slate-400 hidden">
       <i class="ph ph-spinner-gap animate-spin text-4xl mb-2"></i>
       <p class="text-sm">天気データを取得中...</p>
     </div>
     
-    <div id="weatherGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <!-- カードはJSで動的に生成 -->
+    <!-- 左右比較マトリックスコンテナ -->
+    <div id="matrixContainer" class="w-full">
+      <!-- テーブルはJSで動的に生成 -->
     </div>
 
     <div id="emptyState" class="hidden flex-col items-center justify-center py-20 text-slate-500 text-center">
@@ -164,7 +165,6 @@
 
   <script>
     // --- ユーティリティ ---
-    // 前回一部のアイコンが存在しないクラス名だったため、確実に表示されるものに修正しました
     function getWeatherInfo(code) {
       if (code === 0 || code === 1) return { icon: 'ph-sun', color: 'text-orange-500', name: '晴れ' };
       if (code === 2) return { icon: 'ph-cloud-sun', color: 'text-yellow-500', name: '晴れ時々曇り' };
@@ -174,25 +174,37 @@
       if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { icon: 'ph-cloud-rain', color: 'text-blue-500', name: '雨' };
       if ([71, 73, 75, 77, 85, 86].includes(code)) return { icon: 'ph-snowflake', color: 'text-cyan-500', name: '雪' };
       if ([95, 96, 99].includes(code)) return { icon: 'ph-cloud-lightning', color: 'text-purple-500', name: '雷雨' };
-      return { icon: 'ph-sun', color: 'text-slate-400', name: '不明' };
+      return { icon: 'ph-sun', color: 'text-slate-300', name: '不明' };
+    }
+
+    // 傘の必要性を判定するロジック
+    function getUmbrellaStatus(code, pop) {
+      const rainSnowCodes = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99];
+      if (rainSnowCodes.includes(code) || pop >= 50) {
+        return { icon: 'ph-umbrella', color: 'text-blue-600', label: '傘必須', bg: 'bg-blue-100/90' };
+      } else if (pop >= 30) {
+        return { icon: 'ph-umbrella', color: 'text-indigo-500', label: '念のため', bg: 'bg-indigo-100/90' };
+      }
+      return null;
     }
 
     // --- 状態管理 ---
-    const storageKey = 'fukan_weather_locations_v2';
+    // デフォルト指定とデータ構造リセットのためキーを更新(v4)
+    const storageKey = 'fukan_weather_locations_v4';
     const defaultLocations = [
-      { id: 1850144, name: '東京都', admin: '東京都', lat: 35.6895, lon: 139.6917 },
-      { id: 1853909, name: '大阪市', admin: '大阪府', lat: 34.6937, lon: 135.5022 }
+      { id: 1863958, name: '福岡市', admin: '福岡県', lat: 33.5902, lon: 130.4017 },
+      { id: 1859642, name: '川崎市', admin: '神奈川県', lat: 35.5206, lon: 139.7172 }
     ];
     let savedLocations = JSON.parse(localStorage.getItem(storageKey)) || defaultLocations;
     let isEditMode = false;
+    let currentWeatherData = []; 
 
-    const grid = document.getElementById('weatherGrid');
+    const matrixContainer = document.getElementById('matrixContainer');
     const emptyState = document.getElementById('emptyState');
     const loadingIndicator = document.getElementById('loadingIndicator');
     
     // --- 天気データ取得 ---
     async function fetchWeather(lat, lon) {
-      // 精度向上のためモデルの固定指定を削除し、午前午後の計算のために hourly=precipitation_probability を追加
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=precipitation_probability&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo`;
       try {
         const res = await fetch(url);
@@ -206,150 +218,192 @@
 
     async function fetchAndRenderAll() {
       if (savedLocations.length === 0) {
-        grid.innerHTML = '';
+        matrixContainer.innerHTML = '';
         emptyState.classList.remove('hidden');
         return;
       }
       
       emptyState.classList.add('hidden');
-      grid.innerHTML = '';
+      matrixContainer.innerHTML = '';
       loadingIndicator.classList.remove('hidden');
 
       const promises = savedLocations.map(loc => {
         return fetchWeather(loc.lat, loc.lon).then(data => ({ loc, data }));
       });
 
-      const results = await Promise.all(promises);
+      currentWeatherData = await Promise.all(promises);
       loadingIndicator.classList.add('hidden');
-      grid.innerHTML = '';
 
-      results.forEach(res => {
-        if (res && res.data) {
-          renderCard(res.loc, res.data);
-        }
-      });
+      renderMatrix();
     }
 
-    // --- カード描画 ---
-    function renderCard(loc, data) {
-      const daily = data.daily;
-      const hourly = data.hourly;
-      if (!daily || !daily.time) return;
+    // --- マトリックス（表形式）描画 ---
+    function renderMatrix() {
+      matrixContainer.innerHTML = '';
+      if (currentWeatherData.length === 0) return;
 
-      // 1時間ごとのデータから「今日の午前」と「午後の降水確率」を割り出す
-      const todayDateStr = daily.time[0];
-      const todayStartIndex = hourly.time.findIndex(t => t.startsWith(todayDateStr));
-      
-      let todayPopAm = 0;
-      let todayPopPm = 0;
-
-      if (todayStartIndex !== -1) {
-        // 午前: 0時〜11時の最大値
-        const amPops = hourly.precipitation_probability.slice(todayStartIndex, todayStartIndex + 12).map(v => v || 0);
-        todayPopAm = Math.max(...amPops);
-        // 午後: 12時〜23時の最大値
-        const pmPops = hourly.precipitation_probability.slice(todayStartIndex + 12, todayStartIndex + 24).map(v => v || 0);
-        todayPopPm = Math.max(...pmPops);
+      // 基準となる日付リストを取得（正常にデータが取れた地点のものを使用）
+      const validData = currentWeatherData.find(res => res && res.data && res.data.daily);
+      if (!validData) {
+        matrixContainer.innerHTML = `<div class="py-10 text-center text-slate-500 font-bold">データが取得できませんでした</div>`;
+        return;
       }
+      const dailyTimes = validData.data.daily.time;
 
-      const days = [0, 1, 2].map(i => {
-        const code = daily.weathercode[i];
-        const info = getWeatherInfo(code);
-        return {
-          dateLabel: i === 0 ? '今日' : i === 1 ? '明日' : '明後日',
-          icon: info.icon,
-          color: info.color,
-          name: info.name,
-          maxTemp: Math.round(daily.temperature_2m_max[i]),
-          minTemp: Math.round(daily.temperature_2m_min[i]),
-          pop: daily.precipitation_probability_max ? daily.precipitation_probability_max[i] : 0
-        };
-      });
+      const editClass = isEditMode ? 'animate-pulse ring-2 ring-red-400 border-red-400' : 'border-slate-200';
 
-      const today = days[0];
-      const tomorrow = days[1];
-      const dayAfter = days[2];
-
-      const deleteBadge = `
-        <button onclick="removeLocation(${loc.id})" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 shadow-md z-10 transition-transform ${isEditMode ? 'scale-100' : 'scale-0'}">
-          <i class="ph ph-x text-sm font-bold"></i>
-        </button>
-      `;
-
-      // tenki.jpに寄せたデザインに変更
-      const cardHTML = `
-        <div class="relative bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col ${isEditMode ? 'animate-pulse' : ''}" data-id="${loc.id}">
-          ${deleteBadge}
-          
-          <div class="mb-3">
-            <h3 class="font-bold text-slate-800 text-lg leading-tight">${loc.name}</h3>
-            ${loc.admin && loc.admin !== loc.name ? `<p class="text-xs text-slate-400 mt-0.5">${loc.admin}</p>` : ''}
-          </div>
-          
-          <!-- 今日 -->
-          <div class="flex flex-col p-4 bg-slate-50/80 rounded-xl mb-3 border border-slate-100">
-            <div class="flex justify-between items-start mb-1">
-              <span class="text-sm font-bold text-slate-700">今日</span>
-              <!-- 午前・午後の降水確率表示 -->
-              <div class="text-xs font-bold text-slate-500 bg-white px-2 py-1 rounded-md shadow-sm border border-slate-100 flex items-center">
-                <i class="ph ph-drop text-blue-400 mr-1 text-sm"></i>
-                <span>午前 <span class="${todayPopAm >= 40 ? 'text-blue-600' : ''}">${todayPopAm}%</span></span>
-                <span class="mx-1.5 text-slate-200">|</span>
-                <span>午後 <span class="${todayPopPm >= 40 ? 'text-blue-600' : ''}">${todayPopPm}%</span></span>
-              </div>
-            </div>
-            
-            <div class="flex items-center justify-between mt-2">
-              <div class="flex flex-col items-center min-w-[70px]">
-                <i class="ph ${today.icon} ${today.color} text-[3.5rem] drop-shadow-sm leading-none"></i>
-                <span class="text-xs font-bold text-slate-600 mt-2">${today.name}</span>
-              </div>
-              
-              <div class="flex items-baseline gap-4 pr-2">
-                <div class="flex flex-col items-end">
-                  <span class="text-3xl font-bold text-red-500 leading-none">${today.maxTemp}<span class="text-lg">°</span></span>
-                </div>
-                <div class="flex flex-col items-end">
-                  <span class="text-3xl font-bold text-blue-500 leading-none">${today.minTemp}<span class="text-lg">°</span></span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 明日・明後日 -->
-          <div class="grid grid-cols-2 gap-3">
-            <!-- 明日 -->
-            <div class="p-3 bg-white border border-slate-100 rounded-xl flex flex-col items-center shadow-sm">
-              <span class="text-xs font-bold text-slate-500 mb-2">明日</span>
-              <i class="ph ${tomorrow.icon} ${tomorrow.color} text-[2rem] mb-1 drop-shadow-sm leading-none"></i>
-              <span class="text-[10px] font-bold text-slate-500 mb-2">${tomorrow.name}</span>
-              <div class="text-sm font-bold w-full flex justify-center gap-2.5 mb-1.5">
-                <span class="text-red-500">${tomorrow.maxTemp}°</span>
-                <span class="text-blue-500">${tomorrow.minTemp}°</span>
-              </div>
-              <span class="text-[10px] font-bold ${tomorrow.pop >= 40 ? 'text-blue-500' : 'text-slate-400'} flex items-center">
-                <i class="ph ph-drop mr-0.5 text-xs"></i> ${tomorrow.pop}%
-              </span>
-            </div>
-
-            <!-- 明後日 -->
-            <div class="p-3 bg-white border border-slate-100 rounded-xl flex flex-col items-center shadow-sm">
-              <span class="text-xs font-bold text-slate-500 mb-2">明後日</span>
-              <i class="ph ${dayAfter.icon} ${dayAfter.color} text-[2rem] mb-1 drop-shadow-sm leading-none"></i>
-              <span class="text-[10px] font-bold text-slate-500 mb-2">${dayAfter.name}</span>
-              <div class="text-sm font-bold w-full flex justify-center gap-2.5 mb-1.5">
-                <span class="text-red-500">${dayAfter.maxTemp}°</span>
-                <span class="text-blue-500">${dayAfter.minTemp}°</span>
-              </div>
-              <span class="text-[10px] font-bold ${dayAfter.pop >= 40 ? 'text-blue-500' : 'text-slate-400'} flex items-center">
-                <i class="ph ph-drop mr-0.5 text-xs"></i> ${dayAfter.pop}%
-              </span>
-            </div>
-          </div>
-        </div>
+      // テーブルコンテナ (横スクロール可能)
+      let html = `
+        <div class="overflow-x-auto w-full hide-scrollbar bg-white rounded-2xl shadow-sm border relative ${editClass} transition-all duration-300">
+          <table class="w-full text-left border-collapse min-w-max">
+            <thead>
+              <tr>
+                <!-- 左上角 (固定) -->
+                <th class="sticky top-0 left-0 z-30 bg-slate-50 border-b border-r border-slate-200 w-14 sm:w-16 p-0 shadow-[1px_0_0_0_rgba(226,232,240,1)]"></th>
       `;
       
-      grid.insertAdjacentHTML('beforeend', cardHTML);
+      // ヘッダー行: 地点名
+      currentWeatherData.forEach(res => {
+        const loc = res.loc;
+        const isError = !res.data;
+        const badgeScale = isEditMode ? 'scale-100' : 'scale-0';
+        
+        // 削除ボタン
+        const deleteBadge = `
+          <button onclick="removeLocation(${loc.id})" class="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-1 shadow-md z-40 transition-transform ${badgeScale}">
+            <i class="ph ph-x text-xs font-bold leading-none"></i>
+          </button>
+        `;
+        
+        html += `
+          <th class="sticky top-0 z-20 bg-slate-50 border-b border-r border-slate-100 w-24 sm:w-28 text-center py-2 px-1 relative last:border-r-0 align-middle">
+            ${deleteBadge}
+            <div class="text-sm font-bold truncate w-full text-slate-800 ${isError ? 'text-red-500' : ''}">${loc.name}</div>
+            ${loc.admin && loc.admin !== loc.name ? `<div class="text-[9px] font-normal text-slate-400 truncate w-full mt-0.5">${loc.admin}</div>` : '<div class="text-[9px] opacity-0 mt-0.5">-</div>'}
+          </th>
+        `;
+      });
+      html += `</tr></thead><tbody>`;
+
+      // データ行: 日付ごとのループ
+      for (let i = 0; i < dailyTimes.length; i++) {
+        const dateObj = new Date(dailyTimes[i]);
+        const m = dateObj.getMonth() + 1;
+        const d = dateObj.getDate();
+        const dayStr = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+        
+        const isToday = i === 0;
+        const isTomorrow = i === 1;
+        
+        let dateLabel = '';
+        if (isToday) dateLabel = '<div class="text-[10px] font-bold text-blue-600 mb-0.5 leading-none">今日</div>';
+        else if (isTomorrow) dateLabel = '<div class="text-[10px] font-bold text-slate-500 mb-0.5 leading-none">明日</div>';
+        else dateLabel = `<div class="text-[9px] font-bold text-slate-400 mb-0.5 leading-none">${dayStr}曜</div>`;
+
+        const dateColor = isToday ? 'text-blue-700' : 'text-slate-700';
+        
+        // 今日の行だけハイライト色を設定
+        const stickyBgClass = isToday ? 'bg-[#f0f7ff]' : 'bg-[#f8fafc]';
+        const cellBgClass = isToday ? 'bg-[#f8faff]' : 'bg-white';
+
+        html += `<tr>`;
+        
+        // 日付セル (左端固定)
+        html += `
+          <th class="sticky left-0 z-10 ${stickyBgClass} border-b border-r border-slate-200 text-center py-3 px-1 align-middle last:border-b-0 shadow-[1px_0_0_0_rgba(226,232,240,1)]">
+            <div class="flex flex-col items-center justify-center">
+              ${dateLabel}
+              <div class="text-xs sm:text-sm font-bold ${dateColor}">${m}/${d}</div>
+            </div>
+          </th>
+        `;
+
+        // 各地点の天気セル
+        currentWeatherData.forEach(res => {
+          html += `<td class="${cellBgClass} border-b border-r border-slate-100 text-center py-3 px-1 relative align-middle last:border-r-0">`;
+          
+          if (!res.data) {
+            html += `
+              <div class="flex flex-col items-center justify-center">
+                <i class="ph ph-warning-circle text-2xl text-red-300 mb-1"></i>
+                <span class="text-[10px] text-red-400">エラー</span>
+              </div>
+            `;
+          } else {
+            const daily = res.data.daily;
+            const code = daily.weathercode && daily.weathercode[i] !== undefined ? daily.weathercode[i] : -1;
+            const info = getWeatherInfo(code);
+            const maxTemp = daily.temperature_2m_max && daily.temperature_2m_max[i] !== undefined ? Math.round(daily.temperature_2m_max[i]) : '--';
+            const minTemp = daily.temperature_2m_min && daily.temperature_2m_min[i] !== undefined ? Math.round(daily.temperature_2m_min[i]) : '--';
+            
+            let popDisplay = '';
+            let umbrellaHtml = '';
+
+            if (isToday) {
+              const hourly = res.data.hourly;
+              let popAm = 0, popPm = 0;
+              if (hourly && hourly.time && hourly.precipitation_probability) {
+                 const startIndex = hourly.time.findIndex(t => t.startsWith(dailyTimes[i]));
+                 if (startIndex !== -1) {
+                    const amPops = hourly.precipitation_probability.slice(startIndex, startIndex + 12).map(v => v || 0);
+                    if (amPops.length > 0) popAm = Math.max(...amPops);
+                    const pmPops = hourly.precipitation_probability.slice(startIndex + 12, startIndex + 24).map(v => v || 0);
+                    if (pmPops.length > 0) popPm = Math.max(...pmPops);
+                 }
+              }
+
+              // 傘判定 (今日の最高降水確率を使用)
+              const maxPop = Math.max(popAm, popPm);
+              const umbrella = getUmbrellaStatus(code, maxPop);
+              if (umbrella) {
+                umbrellaHtml = `<div class="absolute top-1.5 right-1.5 flex items-center gap-0.5 ${umbrella.bg} backdrop-blur-sm rounded text-[9px] px-1 py-0.5 border border-white/60 z-10"><i class="ph ${umbrella.icon} ${umbrella.color}"></i><span class="font-bold ${umbrella.color} leading-none">${umbrella.label}</span></div>`;
+              }
+
+              // 今日は前・後の降水確率を横並びで表示
+              popDisplay = `
+                ${umbrellaHtml}
+                <div class="mt-2 text-[9px] font-bold text-slate-500 flex items-center justify-center w-full whitespace-nowrap">
+                  <span class="text-slate-400 mr-0.5">前</span>
+                  <span class="${popAm >= 40 ? 'text-blue-600' : 'text-blue-400'} w-[18px] text-left">${popAm}%</span>
+                  <span class="mx-0.5 text-slate-200 font-normal">|</span>
+                  <span class="text-slate-400 mr-0.5">後</span>
+                  <span class="${popPm >= 40 ? 'text-blue-600' : 'text-blue-400'} w-[18px] text-left">${popPm}%</span>
+                </div>
+              `;
+            } else {
+              const pop = daily.precipitation_probability_max && daily.precipitation_probability_max[i] !== undefined ? daily.precipitation_probability_max[i] : 0;
+              
+              // 傘判定
+              const umbrella = getUmbrellaStatus(code, pop);
+              if (umbrella) {
+                umbrellaHtml = `<div class="absolute top-1.5 right-1.5 flex items-center gap-0.5 ${umbrella.bg} backdrop-blur-sm rounded text-[9px] px-1 py-0.5 border border-white/60 z-10"><i class="ph ${umbrella.icon} ${umbrella.color}"></i><span class="font-bold ${umbrella.color} leading-none">${umbrella.label}</span></div>`;
+              }
+
+              popDisplay = `
+                ${umbrellaHtml}
+                <div class="mt-2 text-[10px] font-bold ${pop >= 40 ? 'text-blue-600' : 'text-slate-400'} flex items-center justify-center">
+                  <i class="ph ph-drop mr-0.5"></i>${pop}%
+                </div>
+              `;
+            }
+
+            html += `
+              <div class="flex flex-col items-center justify-center">
+                <i class="ph ${info.icon} ${info.color} text-[1.8rem] sm:text-[2rem] drop-shadow-sm leading-none mb-1"></i>
+                <div class="flex gap-1.5 sm:gap-2 text-xs sm:text-sm font-bold w-full justify-center">
+                  <span class="text-red-500 text-right w-5 sm:w-6">${maxTemp}°</span>
+                  <span class="text-blue-500 text-left w-5 sm:w-6">${minTemp}°</span>
+                </div>
+                ${popDisplay}
+              </div>
+            `;
+          }
+          html += `</td>`;
+        });
+        html += `</tr>`;
+      }
+      html += `</tbody></table></div>`;
+      matrixContainer.innerHTML = html;
     }
 
     // --- 地点検索 ---
@@ -421,7 +475,15 @@
     window.removeLocation = function(id) {
       savedLocations = savedLocations.filter(loc => loc.id !== id);
       localStorage.setItem(storageKey, JSON.stringify(savedLocations));
-      fetchAndRenderAll();
+      
+      currentWeatherData = currentWeatherData.filter(res => res.loc.id !== id);
+      
+      if(savedLocations.length === 0) {
+        matrixContainer.innerHTML = '';
+        emptyState.classList.remove('hidden');
+      } else {
+        renderMatrix();
+      }
     };
 
     // --- UI制御 ---
@@ -432,16 +494,7 @@
       editBtn.classList.toggle('text-red-500', isEditMode);
       editBtn.classList.toggle('text-blue-500', !isEditMode);
       
-      document.querySelectorAll('#weatherGrid > div').forEach(card => {
-        const badge = card.querySelector('button');
-        if (isEditMode) {
-          badge.classList.remove('scale-0');
-          badge.classList.add('scale-100');
-        } else {
-          badge.classList.remove('scale-100');
-          badge.classList.add('scale-0');
-        }
-      });
+      renderMatrix(); // 編集モードUIへ再描画
     });
 
     const addModal = document.getElementById('addModal');
@@ -493,5 +546,3 @@
   </script>
 </body>
 </html>
-
-
